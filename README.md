@@ -8,11 +8,13 @@ times over all runs of the individual tools.
 Usage is as follows:
 
 ```
-  ./avgtime [Options]
-
+  usage: avgtime [Options]
+  
   Options:
       -h --help           print this help menu
       -c --command <cmd>  Command (including arguments) to execute.
+      -e --chk-ret-code   Check the exit code of the programs and take only runs
+                          into the measurements that exited cleanly.
       -n --times <n>      Execute the command <n> times
       -a --avg            Report the arithmetic meanover all runs.
       -g --geomean        Report the geometric mean over all runs.

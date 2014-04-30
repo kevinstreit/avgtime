@@ -25,8 +25,8 @@ struct ExecResult {
   median_musec: u64
 }
 
-fn execute_command(cmd: &str, args: &[~str], n: u64) -> ExecResult {
-  assert!(n >= 1, "Need to execute at least once to measure something!");
+fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> ExecResult {
+  let mut num_successfull_execs = 0;
 
   let mut sum_musecs = 0u64;
   let mut prod_musecs = 1f64;
@@ -35,32 +35,47 @@ fn execute_command(cmd: &str, args: &[~str], n: u64) -> ExecResult {
   for i in range(0, n) {
     let beginning = time::get_time();
     match Process::status(cmd, args) {
-      Ok(_) => {
-        let end = time::get_time();
+      Ok(retCode) => {
+        let success = !checkRetCode || retCode.success();
 
-        let musecs = elapsed_musec(beginning, end) as u64;
-        sum_musecs += musecs;
-        prod_musecs *= musecs as f64;
-        times.push(musecs);
+        if success {
+          let end = time::get_time();
 
-        println!("    [{:4} of {} ]: {}µs", i+1, n, musecs);
+          let musecs = elapsed_musec(beginning, end) as u64;
+          sum_musecs += musecs;
+          prod_musecs *= musecs as f64;
+          times.push(musecs);
+          num_successfull_execs+=1;
+
+          println!("    [{:4} of {} ]: {}µs", i+1, n, musecs);
+        } else {
+          println!("    [{:4} of {} ]: EXECUTION TERMINATED ABNORMALY ({})", i+1, n, retCode);
+        }
       },
       Err(_) => {
-        println!("    [{:4} of {} ]: ERROR", i+1, n);
+        println!("    [{:4} of {} ]: ERROR EXECUTING COMMAND", i+1, n);
       }
     };
   }
 
-  // geomean is nth root oh the value products
-  let one_by_n = 1 as f64 / n as f64;
+  if num_successfull_execs < 1 {
+    return ExecResult {
+      avg_musec:     0,
+      geomean_musec: 0,
+      median_musec:  0
+    }
+  }
+
+  // geomean is nth root of the value products
+  let one_by_n = 1 as f64 / num_successfull_execs as f64;
   let geomean = powf(prod_musecs, one_by_n) as u64;
 
   // Sort to get the median...
   times.sort();
-  let medElem : uint = n as uint / 2;
+  let medElem : uint = num_successfull_execs as uint / 2;
 
   ExecResult {
-    avg_musec:     sum_musecs / n, 
+    avg_musec:     sum_musecs / num_successfull_execs, 
     geomean_musec: geomean, 
     median_musec:  *times.get(medElem)
   }
@@ -75,13 +90,14 @@ fn main() {
     let program = args[0].clone();
 
     let opts = ~[
-      optflag ("h", "help",    "print this help menu"),
-      optmulti("c", "command", "Command (including arguments) to execute.", "<cmd>"),
-      optopt  ("n", "times",   "Execute the command <n> times",             "<n>"),
-      optflag ("a", "avg",     "Report the arithmetic meanover all runs."),
-      optflag ("g", "geomean", "Report the geometric mean over all runs."),
-      optflag ("m", "median",  "Report the median over all runs."),
-      //optflag ("d", "diff",    "Report the differences between the given commands over all runs.")
+      optflag ("h", "help",         "print this help menu"),
+      optmulti("c", "command",      "Command (including arguments) to execute.", "<cmd>"),
+      optflag ("e", "chk-ret-code", "Check the exit code of the programs and take only runs into the measurements that exited cleanly."),
+      optopt  ("n", "times",        "Execute the command <n> times",             "<n>"),
+      optflag ("a", "avg",          "Report the arithmetic meanover all runs."),
+      optflag ("g", "geomean",      "Report the geometric mean over all runs."),
+      optflag ("m", "median",       "Report the median over all runs."),
+      //optflag ("d", "diff",         "Report the differences between the given commands over all runs.")
     ];
 
     let matches = match getopts(args.tail(), opts) {
@@ -97,6 +113,7 @@ fn main() {
     let n_str = matches.opt_str("n").unwrap_or(~"1");
     let n : u64 = from_str(n_str).expect("Illegal number format!");
 
+    let checkRetCode = matches.opt_present("e");
     let avg = matches.opt_present("a");
     let geomean = matches.opt_present("g");
     let median = matches.opt_present("m");
@@ -110,7 +127,7 @@ fn main() {
       println!("==============================");
       println!(" => Executing \"{}\"", cmdstr);
       println!("------------------------------");
-      let exec = execute_command(cmd.clone(), args, n);
+      let exec = execute_command(cmd.clone(), args, n, checkRetCode);
 
       if avg || geomean {
         println!("------------------------------");
