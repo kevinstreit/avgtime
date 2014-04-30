@@ -20,6 +20,8 @@ fn elapsed_musec(from: time::Timespec, to: time::Timespec) -> i64 {
 }
 
 struct ExecResult {
+  cleanExecs: u64,
+
   avg_musec: u64,
   geomean_musec: u64,
   median_musec: u64
@@ -60,6 +62,7 @@ fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> Exec
 
   if num_successfull_execs < 1 {
     return ExecResult {
+      cleanExecs:    0,
       avg_musec:     0,
       geomean_musec: 0,
       median_musec:  0
@@ -75,6 +78,7 @@ fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> Exec
   let medElem : uint = num_successfull_execs as uint / 2;
 
   ExecResult {
+    cleanExecs:    num_successfull_execs,
     avg_musec:     sum_musecs / num_successfull_execs, 
     geomean_musec: geomean, 
     median_musec:  *times.get(medElem)
@@ -131,14 +135,18 @@ fn main() {
 
       if avg || geomean {
         println!("------------------------------");
+        if checkRetCode {
+          let runs_str = format!("{} of {}", exec.cleanExecs, n);
+          println!(" clean execs: {:>14}", runs_str);
+        }
         if avg {
-          println!(" average: {:16}µs", exec.avg_musec);
+          println!("     average: {:12}µs", exec.avg_musec);
         }
         if geomean {
-          println!(" geomean: {:16}µs", exec.geomean_musec);
+          println!("     geomean: {:12}µs", exec.geomean_musec);
         }
         if median {
-          println!("  median: {:16}µs", exec.median_musec);
+          println!("      median: {:12}µs", exec.median_musec);
         }
       }
       println!("==============================");
