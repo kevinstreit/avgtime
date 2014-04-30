@@ -76,8 +76,8 @@ fn main() {
 
     let opts = ~[
       optflag ("h", "help",    "print this help menu"),
-      optmulti("c", "command", "Command (including arguments) to execute.", "cmd"),
-      optopt  ("n", "times",   "Execute the command <n> times",             "n"),
+      optmulti("c", "command", "Command (including arguments) to execute.", "<cmd>"),
+      optopt  ("n", "times",   "Execute the command <n> times",             "<n>"),
       optflag ("a", "avg",     "Report the arithmetic meanover all runs."),
       optflag ("g", "geomean", "Report the geometric mean over all runs."),
       optflag ("m", "median",  "Report the median over all runs."),

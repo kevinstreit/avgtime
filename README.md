@@ -12,8 +12,8 @@ Usage is as follows:
 
   Options:
       -h --help           print this help menu
-      -c --command cmd    Command (including arguments) to execute.
-      -n --times n        Execute the command <n> times
+      -c --command <cmd>  Command (including arguments) to execute.
+      -n --times <n>      Execute the command <n> times
       -a --avg            Report the arithmetic meanover all runs.
       -g --geomean        Report the geometric mean over all runs.
       -m --median         Report the median over all runs.
