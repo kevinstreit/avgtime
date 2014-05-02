@@ -90,66 +90,66 @@ fn print_usage(program: &str, _opts: &[OptGroup]) {
 }
 
 fn main() {
-    let args = os::args();
-    let program = args[0].clone();
+  let args = os::args();
+  let program = args[0].clone();
 
-    let opts = ~[
-      optflag ("h", "help",         "print this help menu"),
-      optmulti("c", "command",      "Command (including arguments) to execute.", "<cmd>"),
-      optflag ("e", "chk-ret-code", "Check the exit code of the programs and take only runs into the measurements that exited cleanly."),
-      optopt  ("n", "times",        "Execute the command <n> times",             "<n>"),
-      optflag ("a", "avg",          "Report the arithmetic meanover all runs."),
-      optflag ("g", "geomean",      "Report the geometric mean over all runs."),
-      optflag ("m", "median",       "Report the median over all runs."),
-      //optflag ("d", "diff",         "Report the differences between the given commands over all runs.")
-    ];
+  let opts = ~[
+    optflag ("h", "help",         "print this help menu"),
+    optmulti("c", "command",      "Command (including arguments) to execute.", "<cmd>"),
+    optflag ("e", "chk-ret-code", "Check the exit code of the programs and take only runs into the measurements that exited cleanly."),
+    optopt  ("n", "times",        "Execute the command <n> times",             "<n>"),
+    optflag ("a", "avg",          "Report the arithmetic meanover all runs."),
+    optflag ("g", "geomean",      "Report the geometric mean over all runs."),
+    optflag ("m", "median",       "Report the median over all runs."),
+    //optflag ("d", "diff",         "Report the differences between the given commands over all runs.")
+  ];
 
-    let matches = match getopts(args.tail(), opts) {
-      Ok(m) => { m }
-      Err(f) => { fail!(f.to_err_msg()) }
-    };
+  let matches = match getopts(args.tail(), opts) {
+    Ok(m) => { m }
+    Err(f) => { fail!(f.to_err_msg()) }
+  };
 
-    if matches.opt_present("h") {
-      print_usage(program, opts);
-      return;
-    }
+  if matches.opt_present("h") {
+    print_usage(program, opts);
+    return;
+  }
 
-    let n_str = matches.opt_str("n").unwrap_or(~"1");
-    let n : u64 = from_str(n_str).expect("Illegal number format!");
+  let n_str = matches.opt_str("n").unwrap_or(~"1");
+  let n : u64 = from_str(n_str).expect("Illegal number format!");
 
-    let checkRetCode = matches.opt_present("e");
-    let avg = matches.opt_present("a");
-    let geomean = matches.opt_present("g");
-    let median = matches.opt_present("m");
-    // let diff = matches.opt_present("d");
+  let checkRetCode = matches.opt_present("e");
+  let avg = matches.opt_present("a");
+  let geomean = matches.opt_present("g");
+  let median = matches.opt_present("m");
+  // let diff = matches.opt_present("d");
 
-    for cmdstr in matches.opt_strs("c").iter() {
-      let mut cmdstrs = cmdstr.words();
-      let cmd = cmdstrs.next().expect("Empty command string!");
-      let args : ~[~str] = cmdstrs.map(|str| str.to_owned()).collect();
+  for cmdstr in matches.opt_strs("c").iter() {
+    let mut cmdstrs = cmdstr.words();
+    let cmd = cmdstrs.next().expect("Empty command string!");
+    let args : ~[~str] = cmdstrs.map(|str| str.to_owned()).collect();
 
-      println!("==============================");
-      println!(" => Executing \"{}\"", cmdstr);
+    println!("==============================");
+    println!(" => Executing \"{}\"", cmdstr);
+    println!("------------------------------");
+    let exec = execute_command(cmd.clone(), args, n, checkRetCode);
+
+    if avg || geomean {
       println!("------------------------------");
-      let exec = execute_command(cmd.clone(), args, n, checkRetCode);
-
-      if avg || geomean {
-        println!("------------------------------");
-        if checkRetCode {
-          let runs_str = format!("{} of {}", exec.cleanExecs, n);
-          println!(" clean execs: {:>14}", runs_str);
-        }
-        if avg {
-          println!("     average: {:12}µs", exec.avg_musec);
-        }
-        if geomean {
-          println!("     geomean: {:12}µs", exec.geomean_musec);
-        }
-        if median {
-          println!("      median: {:12}µs", exec.median_musec);
-        }
+      if checkRetCode {
+        let runs_str = format!("{} of {}", exec.cleanExecs, n);
+        println!(" clean execs: {:>14}", runs_str);
       }
-      println!("==============================");
-      println!("");
+      if avg {
+        println!("     average: {:12}µs", exec.avg_musec);
+      }
+      if geomean {
+        println!("     geomean: {:12}µs", exec.geomean_musec);
+      }
+      if median {
+        println!("      median: {:12}µs", exec.median_musec);
+      }
     }
+    println!("==============================");
+    println!("");
+  }
 }
