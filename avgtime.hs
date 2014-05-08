@@ -5,6 +5,7 @@
 
 import Control.Monad (foldM)
 
+import Data.List (tails)
 import qualified Data.Text as T
 import qualified Data.Vector.Algorithms.Merge as Merge
 import qualified Data.Vector.Unboxed as V
@@ -35,7 +36,8 @@ data Conf = Conf {
   cmp_average   :: Bool,
   cmp_median    :: Bool,
   cmp_geomean   :: Bool,
-  cmp_diff      :: Bool
+  cmp_diff      :: Bool,
+  verbose       :: Bool
 } deriving (Show)
 
 defaultConf = Conf {
@@ -46,7 +48,8 @@ defaultConf = Conf {
   cmp_average   = False,
   cmp_median    = False,
   cmp_geomean   = False,
-  cmp_diff      = False
+  cmp_diff      = False,
+  verbose       = False
 }
 
 options :: [OptDescr (Conf -> Conf)]
@@ -62,6 +65,9 @@ options =
                                 in  args {commands = cmd : (commands args)})
               "<cmd>")
       "Command (including arguments) to execute."
+  , Option ['v'] ["verbose"]
+      (NoArg (\args -> args {verbose=True}))
+      "print execution times for all command executions."
   , Option ['e'] ["chk-ret-code"]
       (NoArg (\args -> args {chk_ret_code=True}))
       "check the exit code of the programs and take only runs into the measurements that exited cleanly."
@@ -95,7 +101,7 @@ parseOpts argv = case getOpt Permute options argv of
                       cmd_name <- getProgName
                       ioError $ userError $ concat errs ++ usageInfo (helpHeader cmd_name) options
     where
-        res mods = case foldl (flip id) defaultConf mods of
+        res mods = case foldr ($) defaultConf mods of
                  conf | help conf -> do
                            cmd_name <- getProgName
                            hPutStrLn stderr $ usageInfo (helpHeader cmd_name) options
@@ -107,29 +113,31 @@ parseOpts argv = case getOpt Permute options argv of
 data ExecResult = ExecResult {
   cleanExecs :: Word32,
 
-  avg_µs     :: Word64,
-  geomean_µs :: Word64,
-  median_µs  :: Word64
+  avg_µs     :: Double,
+  geomean_µs :: Double,
+  median_µs  :: Double
 }
 
 executeCommand :: Conf -> Command -> IO ExecResult
-executeCommand conf@Conf{times=n, chk_ret_code=chk} (Cmd cmd args) = do
+executeCommand conf@Conf{times=n, chk_ret_code=chk, verbose=verb} (Cmd cmd args) = do
   let exec = errExit False $ time $ run_ (fromText cmd) args
-  putStrLn "================================"
-  putStrLn $ " => Executing " ++ (show cmd)
-  putStrLn "--------------------------------"
+  let cstr = show $ T.unwords $ cmd : args
+  printf "\n"
+  when verb $ printf "────────────────────────────────\n"
+  printf "  ⇶ Executing %s\n" cstr
+  when verb $ printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
   times :: [Double] <- foldM (\tms i -> do
-      printf "    [ %3d of %d ] " i n
+      when verb $ printf "    [ %3d of %d ] " i n
       (time, ec) <- shelly $ do
         (tm, _) <- exec
         exit_code <- lastExitCode
         return (tm, exit_code)
       if (ec == 0 || not chk)
       then do
-        printf "%.0fµs\n" $ time * 1e6
+        when verb $ printf "%.0fµs\n" $ time * 1e6
         return (time : tms)
       else do
-        printf "Non-successful execution...\n"
+        when verb $ printf "Non-successful execution...\n"
         return tms
     ) [] [1..n]
 
@@ -141,21 +149,49 @@ executeCommand conf@Conf{times=n, chk_ret_code=chk} (Cmd cmd args) = do
       avg = mean times_vec * 1e6
       geomean = geometricMean times_vec * 1e6
 
-  putStrLn "--------------------------------"
-  let ce_str :: String = printf "%d of %d" numCleanExecs n
-  printf " clean execs: %12s\n" ce_str 
-  when (numCleanExecs > 0) $ do
-    when (cmp_average conf) $ printf "     average: %10.0fµs\n" avg
-    when (cmp_geomean conf) $ printf "     geomean: %10.0fµs\n" geomean
-    when (cmp_median conf)  $ printf "      median: %10.0fµs\n" median
-  putStrLn "================================"
+  when verb $ do
+    printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
+    let ce_str :: String = printf "%d of %d" numCleanExecs n
+    printf " clean execs: %12s\n" ce_str
+    when (numCleanExecs > 0) $ do
+      when (cmp_average conf) $ printf "     average: %10.0fµs\n" avg
+      when (cmp_geomean conf) $ printf "     geomean: %10.0fµs\n" geomean
+      when (cmp_median conf)  $ printf "      median: %10.0fµs\n" median
 
   return $ ExecResult {
     cleanExecs = numCleanExecs,
-    avg_µs     = round avg,
-    geomean_µs = round geomean,
-    median_µs  = round median
+    avg_µs     = avg,
+    geomean_µs = geomean,
+    median_µs  = median
   }
+
+{- Summary printing -}
+
+printDiff :: Conf -> ((Command, ExecResult), (Command, ExecResult)) -> IO ()
+printDiff conf ((Cmd c1 a1, r1), (Cmd c2 a2, r2)) = do
+  let cstr1 = show $ T.unwords $ c1 : a1
+  let cstr2 = show $ T.unwords $ c2 : a2
+
+  printf "\n  ┌     %s\n  ├ vs. %s\n" cstr1 cstr2
+
+  when (cmp_average conf) $ do
+    let relDiff = 100 * ((avg_µs r2) / (avg_µs r1) - 1)
+    printf "  │ average: %4.2f%%\n" relDiff
+
+  when (cmp_geomean conf) $ do
+    let relDiff = 100 * ((geomean_µs r2) / (geomean_µs r1) - 1)
+    printf "  │ geomean: %4.2f%%\n" relDiff
+
+  when (cmp_median conf)  $ do
+    let relDiff = 100 * ((median_µs r2) / (median_µs r1) - 1)
+    printf "  │  median: %4.2f%%\n" relDiff
+
+printDiffs :: Conf -> [ Command ] -> [ ExecResult ] -> IO ()
+printDiffs conf cs rs = do
+  let pairs l = concatMap (\(x:xs) -> zip (repeat x) xs) (filter (not . null) $ tails l)
+  printf "\n────────────────────────────────\n"
+  mapM_ (printDiff conf) $ pairs $ zip cs rs
+  printf "\n────────────────────────────────\n"
 
 {- CLI -}
 
@@ -163,5 +199,7 @@ main = do
   cmdArgs <- getArgs
   conf <- parseOpts cmdArgs
   case conf of
-    Just conf -> mapM_ (executeCommand conf) $ commands conf
+    Just conf -> do
+      results <- mapM (executeCommand conf) $ commands conf
+      when (cmp_diff conf) $ printDiffs conf (commands conf) results
     Nothing -> return ()
