@@ -171,20 +171,13 @@ printDiff :: Conf -> ((Command, ExecResult), (Command, ExecResult)) -> IO ()
 printDiff conf ((Cmd c1 a1, r1), (Cmd c2 a2, r2)) = do
   let cstr1 = show $ T.unwords $ c1 : a1
   let cstr2 = show $ T.unwords $ c2 : a2
+  let relDiff field = 100 * ((field r2) / (field r1) -1)
 
-  printf "\n  ┌     %s\n  ├ vs. %s\n" cstr1 cstr2
-
-  when (cmp_average conf) $ do
-    let relDiff = 100 * ((avg_µs r2) / (avg_µs r1) - 1)
-    printf "  │ average: %4.2f%%\n" relDiff
-
-  when (cmp_geomean conf) $ do
-    let relDiff = 100 * ((geomean_µs r2) / (geomean_µs r1) - 1)
-    printf "  │ geomean: %4.2f%%\n" relDiff
-
-  when (cmp_median conf)  $ do
-    let relDiff = 100 * ((median_µs r2) / (median_µs r1) - 1)
-    printf "  │  median: %4.2f%%\n" relDiff
+  printf                         "\n  ┌     %s\n" cstr1
+  printf                           "  ├ vs. %s\n" cstr2
+  when (cmp_average conf) $ printf "  │ average: %4.2f%%\n" $ relDiff avg_µs
+  when (cmp_geomean conf) $ printf "  │ geomean: %4.2f%%\n" $ relDiff geomean_µs
+  when (cmp_median conf)  $ printf "  │  median: %4.2f%%\n" $ relDiff median_µs
 
 printDiffs :: Conf -> [ Command ] -> [ ExecResult ] -> IO ()
 printDiffs conf cs rs = do
