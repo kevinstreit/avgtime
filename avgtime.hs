@@ -52,39 +52,56 @@ defaultConf = Conf {
   verbose       = False
 }
 
-options :: [OptDescr (Conf -> Conf)]
+options :: [OptDescr ((Conf, Maybe Command) -> (Conf, Maybe Command))]
 options =
   [ Option ['h'] ["help"]
-      (NoArg (\args -> args {help=True}))
+      (NoArg (\(args, t) -> (args {help=True}, t)))
       "Show this help"
   , Option ['c'] ["command"]
-      (ReqArg (\cmd_inv args -> let cmd      = Cmd cmd_name cmd_args
-                                    cmd_name = T.pack $ head wds
-                                    cmd_args = map T.pack $ tail wds
-                                    wds      = words cmd_inv
-                                in  args {commands = cmd : (commands args)})
+      (ReqArg (\cmd_inv (args, t) -> let cmd      = Cmd cmd_name cmd_args
+                                         cmd_name = T.pack $ head wds
+                                         cmd_args = map T.pack $ tail wds
+                                         wds      = words cmd_inv
+                                     in  (args {commands = cmd : (commands args)}, t))
               "<cmd>")
       "Command (including arguments) to execute."
+  , Option ['t'] ["cmd-template"]
+      (ReqArg (\cmd_inv (args, t) -> let cmd      = Cmd cmd_name cmd_args
+                                         cmd_name = T.pack $ head wds
+                                         cmd_args = map T.pack $ tail wds
+                                         wds      = words cmd_inv
+                                     in  (args, Just cmd))
+              "<cmd>")
+      "Partial command (possibly including arguments) to execute.\nThe following options (given via '-o') will be combined with this template to form a command."
+  , Option ['o'] ["options"]
+      (ReqArg (\opts (args, t) -> let nargs = case t of
+                                         Nothing                -> args
+                                         (Just (Cmd cmd cargs)) -> args {commands = nCmd : (commands args)} where
+                                             nCmd = Cmd cmd (cargs ++ addArgs)
+                                             addArgs = map T.pack $ words opts
+                                  in  (nargs, t))
+              "<args>")
+      "Command arguments to combine with the last command template (given via '-t')."
   , Option ['v'] ["verbose"]
-      (NoArg (\args -> args {verbose=True}))
-      "print execution times for all command executions."
+      (NoArg (\(args, t) -> (args {verbose=True}, t)))
+      "Print execution times for all command executions."
   , Option ['e'] ["chk-ret-code"]
-      (NoArg (\args -> args {chk_ret_code=True}))
-      "check the exit code of the programs and take only runs into the measurements that exited cleanly."
+      (NoArg (\(args, t) -> (args {chk_ret_code=True}, t)))
+      "Check the exit code of the programs and take only runs into the measurements that exited cleanly."
   , Option ['n'] ["times"]
-      (ReqArg (\n_str args -> args {times=read n_str}) "<n>")
+      (ReqArg (\n_str (args, t) -> (args {times=read n_str}, t)) "<n>")
       ("Execute the command <n> times (default is " ++ (show $ times defaultConf) ++ ")")
   , Option ['a'] ["avg"]
-      (NoArg (\args -> args {cmp_average=True}))
+      (NoArg (\(args, t) -> (args {cmp_average=True}, t)))
       "Report the arithmetic mean over all runs of each command."
   , Option ['g'] ["geomean"]
-      (NoArg (\args -> args {cmp_geomean=True}))
+      (NoArg (\(args, t) -> (args {cmp_geomean=True}, t)))
       "Report the geometric mean over all runs of each command."
   , Option ['m'] ["median"]
-      (NoArg (\args -> args {cmp_median=True}))
+      (NoArg (\(args, t) -> (args {cmp_median=True}, t)))
       "Report the median over all runs of each command."
   , Option ['d'] ["diff"]
-      (NoArg (\args -> args {cmp_diff=True}))
+      (NoArg (\(args, t) -> (args {cmp_diff=True}, t)))
       "Report the difference in execution times between individual commands."
   ]
 
@@ -95,18 +112,17 @@ parseOpts argv = case getOpt Permute options argv of
         (o, n, []   ) | null n    -> res o
                       | otherwise -> do
                             hPutStrLn stderr $ "WARNING: Unparsed arguments: " ++ (show n)
-                            hPutStrLn stderr ""
                             res o
         (_, _, errs ) -> do
                       cmd_name <- getProgName
                       ioError $ userError $ concat errs ++ usageInfo (helpHeader cmd_name) options
     where
-        res mods = case foldr ($) defaultConf mods of
-                 conf | help conf -> do
-                           cmd_name <- getProgName
-                           hPutStrLn stderr $ usageInfo (helpHeader cmd_name) options
-                           return Nothing
-                      | otherwise -> return $ Just conf
+        res mods = case foldl (flip id) (defaultConf, Nothing) mods of
+                 (conf, _) | help conf -> do
+                                cmd_name <- getProgName
+                                hPutStrLn stderr $ usageInfo (helpHeader cmd_name) options
+                                return Nothing
+                           | otherwise -> return $ Just conf {commands = (reverse $ commands conf)}
 
 {- Process execution -}
 
@@ -178,9 +194,9 @@ printDiff conf ((Cmd c1 a1, r1), (Cmd c2 a2, r2)) = do
 
   printf                         "\n  ┌     %s\n" cstr1
   printf                           "  ├ vs. %s\n" cstr2
-  when (cmp_average conf) $ printf "  │ average: %4.2f%%\n" $ relDiff avg_µs
-  when (cmp_geomean conf) $ printf "  │ geomean: %4.2f%%\n" $ relDiff geomean_µs
-  when (cmp_median conf)  $ printf "  │  median: %4.2f%%\n" $ relDiff median_µs
+  when (cmp_average conf) $ printf "  │     average: %4.2f%%\n" $ relDiff avg_µs
+  when (cmp_geomean conf) $ printf "  │     geomean: %4.2f%%\n" $ relDiff geomean_µs
+  when (cmp_median conf)  $ printf "  │      median: %4.2f%%\n" $ relDiff median_µs
 
 printDiffs :: Conf -> [ Command ] -> [ ExecResult ] -> IO ()
 printDiffs conf cs rs = do
