@@ -37,7 +37,8 @@ data Conf = Conf {
   cmp_median    :: Bool,
   cmp_geomean   :: Bool,
   cmp_diff      :: Bool,
-  verbose       :: Bool
+  verbose       :: Bool,
+  interleaved   :: Bool
 } deriving (Show)
 
 defaultConf = Conf {
@@ -49,7 +50,8 @@ defaultConf = Conf {
   cmp_median    = False,
   cmp_geomean   = False,
   cmp_diff      = False,
-  verbose       = False
+  verbose       = False,
+  interleaved   = False
 }
 
 options :: [OptDescr ((Conf, Maybe Command) -> (Conf, Maybe Command))]
@@ -88,6 +90,9 @@ options =
   , Option ['e'] ["chk-ret-code"]
       (NoArg (\(args, t) -> (args {chk_ret_code=True}, t)))
       "Check the exit code of the programs and take only runs into the measurements that exited cleanly."
+  , Option ['i'] ["interleaved"]
+      (NoArg (\(args, t) -> (args {interleaved=True}, t)))
+      "Execute the instances of individual commands interleaved (instead of one command after the other)."
   , Option ['n'] ["times"]
       (ReqArg (\n_str (args, t) -> (args {times=read n_str}, t)) "<n>")
       ("Execute the command <n> times (default is " ++ (show $ times defaultConf) ++ ")")
@@ -126,6 +131,8 @@ parseOpts argv = case getOpt Permute options argv of
 
 {- Process execution -}
 
+newtype PrelExecResult = PrelExecResult [Double]
+
 data ExecResult = ExecResult {
   cleanExecs :: Word32,
 
@@ -134,19 +141,47 @@ data ExecResult = ExecResult {
   median_µs  :: Double
 }
 
-executeCommand :: Conf -> Command -> IO ExecResult
-executeCommand conf@Conf{times=n, chk_ret_code=chk, verbose=verb} (Cmd cmd args) = do
+finalize :: PrelExecResult -> IO ExecResult
+finalize (PrelExecResult times) = do
+  times_mvec <- V.unsafeThaw $ V.fromList times
+  Merge.sort times_mvec;
+  times_vec <- V.unsafeFreeze times_mvec
+  let numCleanExecs = fromIntegral $ V.length times_vec
+      median = times_vec V.! ( fromIntegral $ numCleanExecs `div` 2) * 1e6
+      avg = mean times_vec * 1e6
+      geomean = geometricMean times_vec * 1e6
+
+  -- when verb $ do
+  --   printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
+  --   let ce_str :: String = printf "%d of %d" numCleanExecs n
+  --   printf " clean execs: %12s\n" ce_str
+  --   when (numCleanExecs > 0) $ do
+  --     when (cmp_average conf) $ printf "     average: %10.0fµs\n" avg
+  --     when (cmp_geomean conf) $ printf "     geomean: %10.0fµs\n" geomean
+  --     when (cmp_median conf)  $ printf "      median: %10.0fµs\n" median
+
+  return $ ExecResult {
+    cleanExecs = numCleanExecs,
+    avg_µs     = avg,
+    geomean_µs = geomean,
+    median_µs  = median
+  }
+
+executeCommand :: Conf -> Word32 -> PrelExecResult -> Command -> IO PrelExecResult
+executeCommand conf@Conf{chk_ret_code=chk, verbose=verb} n (PrelExecResult times) (Cmd cmd args) = do
   absCmd <- if T.head cmd == '.'
             then shelly $ absPath $ fromText cmd
             else return $ fromText cmd
   let exec = errExit False $ time $ run_ absCmd args
   let cstr = show $ T.unwords $ cmd : args
   printf "\n"
-  when verb $ printf "────────────────────────────────\n"
+  when (verb && n > 1) $ printf "────────────────────────────────\n"
   printf "  ⇶ Executing %s\n" cstr
-  when verb $ printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
-  times :: [Double] <- foldM (\tms i -> do
-      when verb $ printf "    [ %3d of %d ] " i n
+  when (verb && n > 1) $ printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
+  ntimes :: [Double] <- foldM (\tms i -> do
+      if (verb && n > 1)
+      then printf "    [ %3d of %d ] " i n
+      else printf "    "
       (time, ec) <- shelly $ do
         (tm, _) <- exec
         exit_code <- lastExitCode
@@ -158,31 +193,21 @@ executeCommand conf@Conf{times=n, chk_ret_code=chk, verbose=verb} (Cmd cmd args)
       else do
         when verb $ printf "Non-successful execution...\n"
         return tms
-    ) [] [1..n]
+    ) times [1..n]
+  
+  return $ PrelExecResult ntimes
 
-  times_mvec <- V.unsafeThaw $ V.fromList times
-  Merge.sort times_mvec;
-  times_vec <- V.unsafeFreeze times_mvec
-  let numCleanExecs = fromIntegral $ V.length times_vec
-      median = times_vec V.! ( fromIntegral $ numCleanExecs `div` 2) * 1e6
-      avg = mean times_vec * 1e6
-      geomean = geometricMean times_vec * 1e6
-
-  when verb $ do
-    printf "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
-    let ce_str :: String = printf "%d of %d" numCleanExecs n
-    printf " clean execs: %12s\n" ce_str
-    when (numCleanExecs > 0) $ do
-      when (cmp_average conf) $ printf "     average: %10.0fµs\n" avg
-      when (cmp_geomean conf) $ printf "     geomean: %10.0fµs\n" geomean
-      when (cmp_median conf)  $ printf "      median: %10.0fµs\n" median
-
-  return $ ExecResult {
-    cleanExecs = numCleanExecs,
-    avg_µs     = avg,
-    geomean_µs = geomean,
-    median_µs  = median
-  }
+executeCommands :: Conf -> IO [ExecResult]
+executeCommands conf@Conf{times=n, interleaved=interleaved}
+  | interleaved = do
+      let crPairs = zip (commands conf) (repeat (PrelExecResult []))
+          cmdStep (cmd, pr) = do
+            npr <- executeCommand conf 1 pr cmd
+            return (cmd, npr)
+          step prs _ = mapM cmdStep prs
+      prelResults <- foldM step crPairs [1..n]
+      mapM (finalize . snd) prelResults
+  | otherwise = mapM (\cmd -> executeCommand conf n (PrelExecResult []) cmd >>= finalize) $ commands conf
 
 {- Summary printing -}
 
@@ -212,6 +237,6 @@ main = do
   conf <- parseOpts cmdArgs
   case conf of
     Just conf -> do
-      results <- mapM (executeCommand conf) $ commands conf
+      results <- executeCommands conf
       when (cmp_diff conf) $ printDiffs conf (commands conf) results
     Nothing -> return ()
