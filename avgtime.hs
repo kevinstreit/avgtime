@@ -120,7 +120,10 @@ data ExecResult = ExecResult {
 
 executeCommand :: Conf -> Command -> IO ExecResult
 executeCommand conf@Conf{times=n, chk_ret_code=chk, verbose=verb} (Cmd cmd args) = do
-  let exec = errExit False $ time $ run_ (fromText cmd) args
+  absCmd <- if T.head cmd == '.'
+            then shelly $ absPath $ fromText cmd
+            else return $ fromText cmd
+  let exec = errExit False $ time $ run_ absCmd args
   let cstr = show $ T.unwords $ cmd : args
   printf "\n"
   when verb $ printf "────────────────────────────────\n"
