@@ -147,13 +147,17 @@ finalize (PrelExecResult times) = do
   times_mvec <- V.unsafeThaw $ V.fromList times
   Merge.sort times_mvec;
   times_vec <- V.unsafeFreeze times_mvec
+
   let numCleanExecs = fromIntegral $ V.length times_vec
-      median = times_vec V.! ( fromIntegral $ numCleanExecs `div` 2)
-      (avg, variance) = meanVarianceUnb times_vec
-      geomean = geometricMean times_vec
+      tenPercent = numCleanExecs `div` 10
+      sliceLength = numCleanExecs - 3 * tenPercent
+      stripped_times_vec = V.take sliceLength times_vec
+      median = stripped_times_vec V.! ( fromIntegral $ sliceLength `div` 2)
+      (avg, variance) = meanVarianceUnb stripped_times_vec
+      geomean = geometricMean stripped_times_vec
 
   return $ ExecResult {
-    cleanExecs = numCleanExecs,
+    cleanExecs = fromIntegral numCleanExecs,
     stddev     = sqrt variance,
     mean_µs    = avg,
     geomean_µs = geomean,
