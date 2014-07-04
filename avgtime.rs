@@ -9,11 +9,13 @@
 
 extern crate time;
 extern crate getopts;
+extern crate core;
+extern crate collections;
 
 use getopts::{optopt,optmulti,optflag,getopts,usage,OptGroup};
-use std::io::Process;
-use std::num::powf;
+use std::io::process::Command;
 use std::os;
+use collections::string::String;
 
 fn elapsed_musec(from: time::Timespec, to: time::Timespec) -> i64 {
   ((to.sec - from.sec) as i64) * 1000000 + ((to.nsec - from.nsec) as i64 / 1000)
@@ -27,7 +29,7 @@ struct ExecResult {
   median_musec: u64
 }
 
-fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> ExecResult {
+fn execute_command(cmd: &str, args: &[String], n: u64, checkRetCode: bool) -> ExecResult {
   let mut num_successfull_execs = 0;
 
   let mut sum_musecs = 0u64;
@@ -36,7 +38,7 @@ fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> Exec
 
   for i in range(0, n) {
     let beginning = time::get_time();
-    match Process::status(cmd, args) {
+    match Command::new(cmd).args(args).status() {
       Ok(retCode) => {
         let success = !checkRetCode || retCode.success();
 
@@ -71,7 +73,7 @@ fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> Exec
 
   // geomean is nth root of the value products
   let one_by_n = 1 as f64 / num_successfull_execs as f64;
-  let geomean = powf(prod_musecs, one_by_n) as u64;
+  let geomean = prod_musecs.powf(one_by_n) as u64;
 
   // Sort to get the median...
   times.sort();
@@ -86,14 +88,14 @@ fn execute_command(cmd: &str, args: &[~str], n: u64, checkRetCode: bool) -> Exec
 }
 
 fn print_usage(program: &str, _opts: &[OptGroup]) {
-    println!("{}", usage("usage: " + program + " [Options]", _opts));
+    println!("usage: {} [Options]\n{}", program, usage("", _opts));
 }
 
 fn main() {
   let args = os::args();
-  let program = args[0].clone();
+  let program = args.get(0).clone();
 
-  let opts = ~[
+  let opts = [
     optflag ("h", "help",         "print this help menu"),
     optmulti("c", "command",      "Command (including arguments) to execute.", "<cmd>"),
     optflag ("e", "chk-ret-code", "Check the exit code of the programs and take only runs into the measurements that exited cleanly."),
@@ -106,16 +108,18 @@ fn main() {
 
   let matches = match getopts(args.tail(), opts) {
     Ok(m) => { m }
-    Err(f) => { fail!(f.to_err_msg()) }
+    Err(f) => { fail!(f.to_str()) }
   };
 
   if matches.opt_present("h") {
-    print_usage(program, opts);
+    print_usage(program.as_slice(), opts);
     return;
   }
 
-  let n_str = matches.opt_str("n").unwrap_or(~"1");
-  let n : u64 = from_str(n_str).expect("Illegal number format!");
+  let n : u64 = match matches.opt_str("n") {
+    Some(n_str) => { from_str(n_str.as_slice()).expect("Illegal number format!") }
+    None        => { 1 }
+  };
 
   let checkRetCode = matches.opt_present("e");
   let avg = matches.opt_present("a");
@@ -124,9 +128,10 @@ fn main() {
   // let diff = matches.opt_present("d");
 
   for cmdstr in matches.opt_strs("c").iter() {
-    let mut cmdstrs = cmdstr.words();
+    let mut cmdstrs = cmdstr.as_slice().words();
     let cmd = cmdstrs.next().expect("Empty command string!");
-    let args : ~[~str] = cmdstrs.map(|str| str.to_owned()).collect();
+    let argsv : Vec<String> = cmdstrs.map(|s| {s.to_string()}).collect();
+    let args = argsv.as_slice();
 
     println!("==============================");
     println!(" => Executing \"{}\"", cmdstr);
